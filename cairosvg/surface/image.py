@@ -22,6 +22,7 @@ Images manager.
 
 import base64
 import gzip
+import os.path
 from io import BytesIO
 try:
     from urllib import urlopen, unquote
@@ -36,6 +37,7 @@ except ImportError:
 from . import cairo
 from .helpers import node_format, size, preserve_ratio
 from ..parser import Tree
+from ..url import parse_url
 
 
 def open_data_url(url):
@@ -75,22 +77,27 @@ def open_data_url(url):
 
 def image(surface, node):
     """Draw an image ``node``."""
-    url = node.get("{http://www.w3.org/1999/xlink}href")
-    if not url:
-        return
-    if url.startswith("data:"):
-        image_bytes = open_data_url(url)
-    else:
-        base_url = node.get("{http://www.w3.org/XML/1998/namespace}base")
-        if base_url:
-            url = urlparse.urljoin(base_url, url)
-        if node.url:
-            url = urlparse.urljoin(node.url, url)
-        if urlparse.urlparse(url).scheme:
-            input_ = urlopen(url)
-        else:
-            input_ = open(url, 'rb')  # filename
-        image_bytes = input_.read()
+    # url = node.get("{http://www.w3.org/1999/xlink}href")
+    # if not url:
+    #     return
+    # if url.startswith("data:"):
+    #     image_bytes = open_data_url(url)
+    # else:
+    #     base_url = node.get("{http://www.w3.org/XML/1998/namespace}base")
+    #     if base_url:
+    #         url = urlparse.urljoin(base_url, url)
+    #     if node.url:
+    #         url = urlparse.urljoin(node.url, url)
+    #     if urlparse.urlparse(url).scheme:
+    #         input_ = urlopen(url)
+    #     else:
+    #         input_ = open(url, 'rb')  # filename
+    #     image_bytes = input_.read()
+    base_url = node.get('{http://www.w3.org/XML/1998/namespace}base')
+    if not base_url and node.url:
+        base_url = os.path.dirname(node.url) + '/'
+    url = parse_url(node.get_href(), base_url)
+    image_bytes = node.fetch_url(url, 'image/*')
 
     if len(image_bytes) < 5:
         return

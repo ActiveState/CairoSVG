@@ -85,6 +85,9 @@ class Surface(object):
         :param bytestring: The SVG source as a byte-string.
         :param file_obj: A file-like object.
         :param url: A filename.
+        :param unsafe: A boolean allowing external file access, XML entities
+                       and very large files
+                       (WARNING: vulnerable to XXE attacks and various DoS).
 
         And the output with:
 

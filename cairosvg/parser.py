@@ -52,6 +52,7 @@ import os.path
 from .css import apply_stylesheets
 from .features import match_features
 from .surface.helpers import urls, rotations, pop_rotation, flatten
+from .url import fetch, safe_fetch, read_url, parse_url
 
 
 # Python 2/3 compat
@@ -104,7 +105,7 @@ NOT_INHERITED_ATTRS = frozenset([
 class Node(dict):
     """SVG node with dict-like properties and children."""
 
-    def __init__(self, node, parent=None, parent_children=False, url=None,
+    def __init__(self, node, url_fetcher, parent=None, parent_children=False, url=None, unsafe = False,
                 __not_inherited_attrs=NOT_INHERITED_ATTRS):
         """Create the Node from ElementTree ``node``, with ``parent`` Node."""
         self.children = ()
@@ -113,7 +114,8 @@ class Node(dict):
         self.tag = node.tag
         self.text = node.text
         self.node = node
-
+        self.url_fetcher = url_fetcher
+        self.unsafe = unsafe
         # Inherits from parent properties
         if parent is not None:
             self.update([
@@ -160,16 +162,19 @@ class Node(dict):
             self.children, _ = self.text_children(node, True, True)
 
         if parent_children:
-            self.children = [Node(child.node, parent=self)
+            self.children = [Node(child.node, self.url_fetcher, parent=self, unsafe=self.unsafe)
                              for child in parent.children]
         elif not self.children:
             self.children = []
             for child in node:
                 if isinstance(child.tag, basestring):
                     if match_features(child):
-                        self.children.append(Node(child, self))
+                        self.children.append(Node(child, self.url_fetcher, parent=self, unsafe=self.unsafe))
                         if self.tag == "switch":
                             break
+
+    def fetch_url(self, url, resource_type, get_child_fetcher=True):
+        return read_url(url, self.url_fetcher, resource_type)
 
     def text_children(self, node, trailing_space, text_root=False):
         """Create children and return them."""
@@ -190,18 +195,18 @@ class Node(dict):
                 href = child.get("{http://www.w3.org/1999/xlink}href")
                 tree_urls = urls(href)
                 url = tree_urls[0] if tree_urls else None
-                child_tree = Tree(url=url, parent=self)
+                child_tree = Tree(url=url, url_fetcher=self.url_fetcher, parent=self, unsafe=self.unsafe)
                 child_tree.clear()
                 child_tree.update(self)
                 child_node = Node(
-                    child, parent=child_tree, parent_children=True)
+                    child, self.url_fetcher, parent=child_tree, parent_children=True, unsafe=self.unsafe)
                 child_node.tag = "tspan"
                 # Retrieve the referenced node and get its flattened text
                 # and remove the node children.
                 child = child_tree.xml_tree
                 child.text = flatten(child)
             else:
-                child_node = Node(child, parent=self)
+                child_node = Node(child, self.url_fetcher, parent=self, unsafe=self.unsafe)
             child_preserve = child_node.get(space) == "preserve"
             child_node.text = handle_white_spaces(child.text, child_preserve)
             child_node.children, trailing_space = \
@@ -211,7 +216,7 @@ class Node(dict):
                 pop_rotation(child_node, original_rotate, rotate)
             children.append(child_node)
             if child.tail:
-                anonymous = Node(ElementTree.Element("tspan"), parent=self)
+                anonymous = Node(ElementTree.Element("tspan"), self.url_fetcher, parent=self, unsafe=self.unsafe)
                 anonymous.text = handle_white_spaces(child.tail, preserve)
                 if original_rotate:
                     pop_rotation(anonymous, original_rotate, rotate)
@@ -226,6 +231,9 @@ class Node(dict):
 
         return children, trailing_space
 
+    def get_href(self):
+        return self.get('{http://www.w3.org/1999/xlink}href', self.get('href'))
+
 
 class Tree(Node):
     """SVG tree."""
@@ -233,17 +241,22 @@ class Tree(Node):
         tree_cache = kwargs.get("tree_cache")
         if tree_cache:
             if "url" in kwargs:
-                url_parts = kwargs["url"].split("#", 1)
-                if len(url_parts) == 2:
-                    url, element_id = url_parts
-                else:
-                    url, element_id = url_parts[0], None
+                # url_parts = kwargs["url"].split("#", 1)
+                # if len(url_parts) == 2:
+                #     url, element_id = url_parts
+                # else:
+                #     url, element_id = url_parts[0], None
+                parsed_url = parse_url(kwargs['url'])
+                url = parsed_url.geturl()
+                element_id = parsed_url.fragment
+
                 parent = kwargs.get("parent")
+                unsafe = kwargs.get("unsafe")
                 if parent and not url:
                     url = parent.url
                 if (url, element_id) in tree_cache:
                     cached_tree = tree_cache[(url, element_id)]
-                    new_tree = Node(cached_tree.xml_tree, parent)
+                    new_tree = Node(cached_tree.xml_tree, cached_tree.url_fetcher, parent, unsafe=unsafe)
                     new_tree.xml_tree = cached_tree.xml_tree
                     new_tree.url = url
                     new_tree.tag = cached_tree.tag
@@ -267,6 +280,9 @@ class Tree(Node):
         tree_cache = kwargs.pop("tree_cache", None)
         element_id = None
 
+        self.url_fetcher = kwargs.get('url_fetcher', fetch)
+
+        self.unsafe = unsafe
         if HAS_LXML:
             parser = ElementTree.XMLParser(resolve_entities=unsafe)
         else:
@@ -313,6 +329,11 @@ class Tree(Node):
             raise TypeError(
                 "No input. Use one of bytestring, file_obj or url.")
         remove_svg_namespace(tree)
+
+        # Don’t allow fetching external files unless explicitly asked for
+        if 'url_fetcher' not in kwargs and not unsafe:
+            self.url_fetcher = safe_fetch
+
         self.xml_tree = tree
         apply_stylesheets(self)
         if element_id:
@@ -326,7 +347,7 @@ class Tree(Node):
             else:
                 raise TypeError(
                     'No tag with id="%s" found.' % element_id)
-        super(Tree, self).__init__(self.xml_tree, parent, parent_children, url)
+        super(Tree, self).__init__(self.xml_tree, self.url_fetcher, parent, parent_children, url, unsafe=self.unsafe)
         self.root = True
         if tree_cache is not None and url is not None:
             tree_cache[(self.url, self["id"])] = self
