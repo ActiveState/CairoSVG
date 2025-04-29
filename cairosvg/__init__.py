@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # This file is part of CairoSVG
-# Copyright © 2010-2012 Kozea
+# Copyright (c) 2010-2012 Kozea
 #
 # This library is free software: you can redistribute it and/or modify it under
 # the terms of the GNU Lesser General Public License as published by the Free
@@ -24,10 +24,11 @@ import os
 import sys
 import optparse
 
+VERSION = '1.0.22'
+
 from . import surface
 
 
-VERSION = '1.0.22'
 SURFACES = {
     'SVG': surface.SVGSurface,  # Tell us if you actually use this one!
     'PNG': surface.PNGSurface,
@@ -65,7 +66,7 @@ def main():
         '-H', '--height', default=None, type="float",
         help='height of the parent container in pixels')
     option_parser.add_option(
-        '-u', '--unsafe', action='store_true',
+        '-u', '--unsafe', default=False, action='store_true',
         help='resolve XML entities (WARNING: vulnerable to XXE attacks)')
     option_parser.add_option(
         "-o", "--output",
